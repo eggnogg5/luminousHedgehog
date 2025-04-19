@@ -683,9 +683,6 @@
             const tableBody = document.querySelector('#schedule tbody');
             tableBody.innerHTML = '';
             
-            // Load saved data
-            loadSavedData();
-            
             // Set username in input
             document.getElementById('username').value = username;
             
@@ -768,12 +765,10 @@
                     });
                 }
                 
-                // Add users who set priorities and apply priority styling
+                // Add users who set priorities
                 if (priorities[actId]) {
-                    Object.entries(priorities[actId]).forEach(([user, priority]) => {
+                    Object.keys(priorities[actId]).forEach(user => {
                         interactingUsers.add(user);
-                        // Add priority class to the act div
-                        actDiv.classList.add(`${priority}-priority`);
                     });
                 }
                 
@@ -899,13 +894,9 @@
                 
                 comments[actId].push(newComment);
                 
-                // Save to localStorage for backwards compatibility
-                saveData();
-                
-                // Save to Firebase
+                // Save to Firebase under activities/{actId}/comments
                 const db = firebase.database();
-                const commentsRef = db.ref(`activities/${actId}/comments`);
-                commentsRef.push(newComment);
+                db.ref(`activities/${actId}/comments`).push(newComment);
             }
             
             closeModal();
@@ -915,6 +906,7 @@
         function setPriority(level) {
             const actId = document.getElementById('commentInput').dataset.actId;
             
+            // Update local priorities object
             if (!priorities[actId]) {
                 priorities[actId] = {};
             }
@@ -928,13 +920,13 @@
                 priorities[actId][username] = level;
             }
             
-            // Save to localStorage for backwards compatibility
-            saveData();
-            
-            // Save to Firebase - store under activities to make it globally accessible
+            // Save to Firebase under activities/{actId}/priorities/{username}
             const db = firebase.database();
-            const activityRef = db.ref(`activities/${actId}/priorities/${username}`);
-            activityRef.set(level);
+            if (level === 'none') {
+                db.ref(`activities/${actId}/priorities/${username}`).remove();
+            } else {
+                db.ref(`activities/${actId}/priorities/${username}`).set(level);
+            }
             
             // Refresh the schedule
             initSchedule();
@@ -955,64 +947,6 @@
             }
         }
         
-        function saveData() {
-            localStorage.setItem('bonnarooComments', JSON.stringify(comments));
-            localStorage.setItem('bonnarooPriorities', JSON.stringify(priorities));
-        }
-        
-        function loadSavedData() {
-            const savedComments = localStorage.getItem('bonnarooComments');
-            const savedPriorities = localStorage.getItem('bonnarooPriorities');
-            
-            // Standardize saved username
-            const savedUsername = localStorage.getItem('bonnarooUsername');
-            if (savedUsername) {
-                username = savedUsername.charAt(0).toUpperCase() + savedUsername.slice(1).toLowerCase();
-                localStorage.setItem('bonnarooUsername', username);  // Update stored username to standardized format
-            }
-            
-            if (savedComments) {
-                const parsedComments = JSON.parse(savedComments);
-                // Convert old format (string) to new format (array of objects) if needed
-                comments = {};
-                for (const [actId, comment] of Object.entries(parsedComments)) {
-                    if (typeof comment === 'string') {
-                        comments[actId] = [{
-                            username: username,
-                            text: comment
-                        }];
-                    } else {
-                        // Standardize usernames in existing comments
-                        comments[actId] = comment.map(c => ({
-                            ...c,
-                            username: c.username.charAt(0).toUpperCase() + c.username.slice(1).toLowerCase()
-                        }));
-                    }
-                }
-            }
-            
-            if (savedPriorities) {
-                const oldPriorities = JSON.parse(savedPriorities);
-                // Convert old format to new user-specific format and standardize usernames
-                priorities = {};
-                for (const [actId, priority] of Object.entries(oldPriorities)) {
-                    if (typeof priority === 'string') {
-                        // Old format - convert to new format
-                        if (priority) {  // Only convert non-empty priorities
-                            priorities[actId] = { [username]: priority };
-                        }
-                    } else {
-                        // Already in new format, but need to standardize usernames
-                        priorities[actId] = {};
-                        for (const [user, prio] of Object.entries(priority)) {
-                            const standardizedUsername = user.charAt(0).toUpperCase() + user.slice(1).toLowerCase();
-                            priorities[actId][standardizedUsername] = prio;
-                        }
-                    }
-                }
-            }
-        }
-        
         function setupFilters() {
             // Day selector
             document.querySelectorAll('.day-btn').forEach(btn => {
@@ -1025,28 +959,20 @@
             });
         }
         
-        function resetFilters() {
-            initSchedule();
-        }
-        
         function updatePriorityActsList() {
             const container = document.getElementById('priorityActsList');
             container.innerHTML = '';
             
-            // Sort acts by priority (high -> medium -> low)
-            const priorityOrder = { 'high': 0, 'medium': 1, 'low': 2 };
-            const sortedActs = Object.keys(priorities)
-                .filter(actId => priorities[actId]) // Only get acts with a priority
-                .sort((a, b) => {
-                    return priorityOrder[priorities[a]] - priorityOrder[priorities[b]];
-                });
-                
-            sortedActs.forEach(actId => {
+            // Get all acts that have priorities set
+            const actsWithPriorities = Object.entries(priorities)
+                .filter(([_, userPriorities]) => Object.keys(userPriorities).length > 0);
+            
+            actsWithPriorities.forEach(([actId, _]) => {
                 const [actName, stageClass] = actId.split('-');
                 const stageName = stageClass.replace('-', ' ').replace('stage', 'Stage').replace('tent', 'Tent');
                 
                 const chip = document.createElement('div');
-                chip.className = `act-chip ${stageClass} priority-${priorities[actId]}`;
+                chip.className = `act-chip ${stageClass}`;
                 chip.textContent = `${actName} (${stageName})`;
                 chip.onclick = () => {
                     openCommentModal(actName, stageClass);
@@ -1055,41 +981,32 @@
                 container.appendChild(chip);
             });
             
-            if (sortedActs.length === 0) {
-                container.innerHTML = '<p>No priority acts selected yet. Click the "+" button on any act to set priorities.</p>';
+            if (actsWithPriorities.length === 0) {
+                container.innerHTML = '<p>No priority acts selected yet. Click on any act to set priorities.</p>';
             }
         }
         
-        function deleteComment(actId, index) {
+        function deleteComment(actId, commentIndex) {
             if (comments[actId]) {
-                const commentToDelete = comments[actId][index];
-                
-                // Only allow deletion if it's the user's own comment
-                if (commentToDelete.username === username) {
-                    comments[actId].splice(index, 1);
+                const comment = comments[actId][commentIndex];
+                if (comment.username === username) {  // Only allow users to delete their own comments
+                    comments[actId].splice(commentIndex, 1);
                     if (comments[actId].length === 0) {
                         delete comments[actId];
                     }
                     
-                    // Save to localStorage
-                    saveData();
-                    
-                    // Update Firebase
+                    // Remove from Firebase
+                    // We need to find the Firebase key for this comment
                     const db = firebase.database();
-                    const commentsRef = db.ref(`activities/${actId}/comments`);
-                    
-                    // Find and remove the matching comment in Firebase
-                    commentsRef.once('value', (snapshot) => {
-                        snapshot.forEach((childSnapshot) => {
-                            const comment = childSnapshot.val();
-                            if (comment.username === commentToDelete.username && 
-                                comment.text === commentToDelete.text) {
+                    db.ref(`activities/${actId}/comments`).once('value', snapshot => {
+                        snapshot.forEach(childSnapshot => {
+                            const fbComment = childSnapshot.val();
+                            if (fbComment.username === comment.username && fbComment.text === comment.text) {
                                 childSnapshot.ref.remove();
                             }
                         });
                     });
                     
-                    // Refresh the UI
                     initSchedule();
                     
                     // Refresh the modal content
@@ -1100,39 +1017,12 @@
             }
         }
         
-        // Load all data from Firebase when page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            const db = firebase.database();
-            const activitiesRef = db.ref('activities');
-            
-            // Listen for any changes to activities data
-            activitiesRef.on('value', (snapshot) => {
-                const activitiesData = snapshot.val() || {};
-                
-                // Reset local storage
-                priorities = {};
-                comments = {};
-                
-                // Process all activities
-                Object.entries(activitiesData).forEach(([actId, data]) => {
-                    // Handle priorities
-                    if (data.priorities) {
-                        priorities[actId] = data.priorities;
-                    }
-                    
-                    // Handle comments
-                    if (data.comments) {
-                        comments[actId] = Object.values(data.comments);
-                    }
-                });
-                
-                // Update the UI
-                initSchedule();
-            });
-        });
-        
         // Initialize when the page loads
         window.onload = function() {
+            // Load username from localStorage
+            username = localStorage.getItem('bonnarooUsername') || 'Anonymous';
+            
+            // Initialize the schedule
             initSchedule();
             
             // Close modal when clicking outside of it

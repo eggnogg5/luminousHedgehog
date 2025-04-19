@@ -331,6 +331,45 @@
         .user-priority-low {
             border: 2px solid #cd7f32;
         }
+        
+        .priority-legend {
+            margin-top: 15px;
+            color: #ddd;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .sample-outline {
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            color: black;
+            background-color: #ddd;
+        }
+
+        .sample-outline.high {
+            border: 2px solid gold;
+            background-color: gold;
+        }
+
+        .sample-outline.medium {
+            border: 2px solid silver;
+            background-color: silver;
+        }
+
+        .sample-outline.low {
+            border: 2px solid #cd7f32;
+            background-color: #cd7f32;
+        }
     </style>
 </head>
 <body>
@@ -352,23 +391,18 @@
                 <button class="day-btn" data-day="saturday">Saturday</button>
                 <button class="day-btn" data-day="sunday">Sunday</button>
             </div>
-            
-            <div class="filter-group">
-                <span class="filter-label">Priority:</span>
-                <input type="checkbox" id="high-filter" checked>
-                <label for="high-filter" style="border: 2px solid gold; padding: 2px 6px; border-radius: 3px;">High</label>
-                
-                <input type="checkbox" id="medium-filter" checked>
-                <label for="medium-filter" style="border: 2px solid silver; padding: 2px 6px; border-radius: 3px;">Medium</label>
-                
-                <input type="checkbox" id="low-filter" checked>
-                <label for="low-filter" style="border: 2px solid #cd7f32; padding: 2px 6px; border-radius: 3px;">Low</label>
-                
-                <input type="checkbox" id="none-filter" checked>
-                <label for="none-filter" style="border: 2px solid #666; padding: 2px 6px; border-radius: 3px;">None</label>
+            <div class="priority-legend">
+                Priority Color Key: 
+                <span class="legend-item">
+                    <span class="sample-outline high">High</span>
+                </span>
+                <span class="legend-item">
+                    <span class="sample-outline medium">Medium</span>
+                </span>
+                <span class="legend-item">
+                    <span class="sample-outline low">Low</span>
+                </span>
             </div>
-            
-            <button class="button" onclick="resetFilters()">Reset Filters</button>
         </div>
         
         <div class="schedule-container">
@@ -886,7 +920,9 @@
         function setUsername() {
             const newUsername = document.getElementById('username').value.trim();
             if (newUsername) {
-                username = newUsername;
+                // Capitalize first letter, rest lowercase
+                username = newUsername.charAt(0).toUpperCase() + newUsername.slice(1).toLowerCase();
+                document.getElementById('username').value = username;  // Update input field to show standardized format
                 localStorage.setItem('bonnarooUsername', username);
             }
         }
@@ -900,6 +936,13 @@
             const savedComments = localStorage.getItem('bonnarooComments');
             const savedPriorities = localStorage.getItem('bonnarooPriorities');
             
+            // Standardize saved username
+            const savedUsername = localStorage.getItem('bonnarooUsername');
+            if (savedUsername) {
+                username = savedUsername.charAt(0).toUpperCase() + savedUsername.slice(1).toLowerCase();
+                localStorage.setItem('bonnarooUsername', username);  // Update stored username to standardized format
+            }
+            
             if (savedComments) {
                 const parsedComments = JSON.parse(savedComments);
                 // Convert old format (string) to new format (array of objects) if needed
@@ -911,14 +954,18 @@
                             text: comment
                         }];
                     } else {
-                        comments[actId] = comment;
+                        // Standardize usernames in existing comments
+                        comments[actId] = comment.map(c => ({
+                            ...c,
+                            username: c.username.charAt(0).toUpperCase() + c.username.slice(1).toLowerCase()
+                        }));
                     }
                 }
             }
             
             if (savedPriorities) {
                 const oldPriorities = JSON.parse(savedPriorities);
-                // Convert old format to new user-specific format
+                // Convert old format to new user-specific format and standardize usernames
                 priorities = {};
                 for (const [actId, priority] of Object.entries(oldPriorities)) {
                     if (typeof priority === 'string') {
@@ -927,8 +974,12 @@
                             priorities[actId] = { [username]: priority };
                         }
                     } else {
-                        // Already in new format
-                        priorities[actId] = priority;
+                        // Already in new format, but need to standardize usernames
+                        priorities[actId] = {};
+                        for (const [user, prio] of Object.entries(priority)) {
+                            const standardizedUsername = user.charAt(0).toUpperCase() + user.slice(1).toLowerCase();
+                            priorities[actId][standardizedUsername] = prio;
+                        }
                     }
                 }
             }
@@ -944,49 +995,10 @@
                     initSchedule();
                 });
             });
-            
-            // Priority filters
-            document.getElementById('high-filter').addEventListener('change', applyFilters);
-            document.getElementById('medium-filter').addEventListener('change', applyFilters);
-            document.getElementById('low-filter').addEventListener('change', applyFilters);
-            document.getElementById('none-filter').addEventListener('change', applyFilters);
-        }
-        
-        function applyFilters() {
-            const priorityLevels = {
-                'high': document.getElementById('high-filter').checked,
-                'medium': document.getElementById('medium-filter').checked,
-                'low': document.getElementById('low-filter').checked,
-                'none': document.getElementById('none-filter').checked
-            };
-            
-            const cells = document.querySelectorAll('#schedule td');
-            cells.forEach(cell => {
-                if (cell.classList.contains('time-column')) return;
-                
-                const actDiv = cell.querySelector('.act');
-                
-                if (actDiv) {
-                    const actId = actDiv.dataset.id;
-                    const priority = priorities[actId] || 'none';
-                    
-                    if (!priorityLevels[priority]) {
-                        cell.style.display = 'none';
-                    } else {
-                        cell.style.display = '';
-                    }
-                } else {
-                    cell.style.display = '';
-                }
-            });
         }
         
         function resetFilters() {
-            const checkboxes = document.querySelectorAll('.filter-group input[type="checkbox"]');
-            checkboxes.forEach(checkbox => {
-                checkbox.checked = true;
-            });
-            applyFilters();
+            initSchedule();
         }
         
         function updatePriorityActsList() {

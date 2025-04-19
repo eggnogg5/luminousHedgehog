@@ -825,49 +825,66 @@
                 }
             });
             
-            // Clear and populate existing comments
-            const commentsList = document.getElementById('commentsList');
-            commentsList.innerHTML = '';
+            // Set up real-time listener for comments
+            const db = firebase.database();
+            const commentsRef = db.ref(`activities/${actId}/comments`);
             
-            const existingComments = comments[actId] || [];
-            if (existingComments.length > 0) {
-                existingComments.forEach((comment, index) => {
-                    const commentDiv = document.createElement('div');
-                    commentDiv.className = 'comment-item';
-                    
-                    const usernameDiv = document.createElement('div');
-                    usernameDiv.className = 'comment-username';
-                    usernameDiv.textContent = comment.username + ':';
-                    
-                    const textDiv = document.createElement('div');
-                    textDiv.className = 'comment-text';
-                    textDiv.textContent = comment.text;
-                    
-                    commentDiv.appendChild(usernameDiv);
-                    commentDiv.appendChild(textDiv);
+            // Function to update comments display
+            function updateCommentsDisplay(snapshot) {
+                const commentsList = document.getElementById('commentsList');
+                commentsList.innerHTML = '';
+                
+                const commentsData = snapshot.val() || {};
+                const commentArray = Object.entries(commentsData).map(([key, value]) => ({
+                    ...value,
+                    key // Store Firebase key for deletion
+                }));
+                
+                if (commentArray.length > 0) {
+                    commentArray.forEach(comment => {
+                        const commentDiv = document.createElement('div');
+                        commentDiv.className = 'comment-item';
+                        
+                        const usernameDiv = document.createElement('div');
+                        usernameDiv.className = 'comment-username';
+                        usernameDiv.textContent = comment.username + ':';
+                        
+                        const textDiv = document.createElement('div');
+                        textDiv.className = 'comment-text';
+                        textDiv.textContent = comment.text;
+                        
+                        commentDiv.appendChild(usernameDiv);
+                        commentDiv.appendChild(textDiv);
 
-                    // Add delete button only for the current user's comments
-                    if (comment.username === username) {
-                        const deleteButton = document.createElement('div');
-                        deleteButton.className = 'delete-comment';
-                        deleteButton.innerHTML = '🗑️';
-                        deleteButton.title = 'Delete comment';
-                        deleteButton.onclick = (e) => {
-                            e.stopPropagation();
-                            if (confirm('Are you sure you want to delete this comment?')) {
-                                deleteComment(actId, index);
-                            }
-                        };
-                        commentDiv.appendChild(deleteButton);
-                    }
-                    
-                    commentsList.appendChild(commentDiv);
-                });
-            } else {
-                commentsList.innerHTML = '<div class="comment-item">No comments yet</div>';
+                        // Add delete button only for the current user's comments
+                        if (comment.username === username) {
+                            const deleteButton = document.createElement('div');
+                            deleteButton.className = 'delete-comment';
+                            deleteButton.innerHTML = '🗑️';
+                            deleteButton.title = 'Delete comment';
+                            deleteButton.onclick = (e) => {
+                                e.stopPropagation();
+                                if (confirm('Are you sure you want to delete this comment?')) {
+                                    db.ref(`activities/${actId}/comments/${comment.key}`).remove();
+                                }
+                            };
+                            commentDiv.appendChild(deleteButton);
+                        }
+                        
+                        commentsList.appendChild(commentDiv);
+                    });
+                } else {
+                    commentsList.innerHTML = '<div class="comment-item">No comments yet</div>';
+                }
             }
             
-            // Clear input field for new comment and store actId
+            // Set up the real-time listener
+            commentsRef.on('value', updateCommentsDisplay);
+            
+            // Store the reference to remove listener when modal closes
+            modal.dataset.currentActId = actId;
+            
+            // Clear input field for new comment
             document.getElementById('commentInput').value = '';
             document.getElementById('commentInput').dataset.actId = actId;
             
@@ -875,32 +892,35 @@
         }
         
         function closeModal() {
-            document.getElementById('commentModal').style.display = 'none';
+            const modal = document.getElementById('commentModal');
+            const actId = modal.dataset.currentActId;
+            
+            // Remove the real-time listener for comments
+            if (actId) {
+                const db = firebase.database();
+                db.ref(`activities/${actId}/comments`).off();
+            }
+            
+            modal.style.display = 'none';
         }
-        
+
         function saveComment() {
             const commentText = document.getElementById('commentInput').value.trim();
             const actId = document.getElementById('commentInput').dataset.actId;
             
             if (commentText) {
-                if (!comments[actId]) {
-                    comments[actId] = [];
-                }
-                
                 const newComment = {
                     username: username,
                     text: commentText
                 };
                 
-                comments[actId].push(newComment);
-                
                 // Save to Firebase under activities/{actId}/comments
                 const db = firebase.database();
                 db.ref(`activities/${actId}/comments`).push(newComment);
+                
+                // Clear the input
+                document.getElementById('commentInput').value = '';
             }
-            
-            closeModal();
-            initSchedule();
         }
         
         function setPriority(level) {
@@ -986,44 +1006,36 @@
             }
         }
         
-        function deleteComment(actId, commentIndex) {
-            if (comments[actId]) {
-                const comment = comments[actId][commentIndex];
-                if (comment.username === username) {  // Only allow users to delete their own comments
-                    comments[actId].splice(commentIndex, 1);
-                    if (comments[actId].length === 0) {
-                        delete comments[actId];
-                    }
-                    
-                    // Remove from Firebase
-                    // We need to find the Firebase key for this comment
-                    const db = firebase.database();
-                    db.ref(`activities/${actId}/comments`).once('value', snapshot => {
-                        snapshot.forEach(childSnapshot => {
-                            const fbComment = childSnapshot.val();
-                            if (fbComment.username === comment.username && fbComment.text === comment.text) {
-                                childSnapshot.ref.remove();
-                            }
-                        });
-                    });
-                    
-                    initSchedule();
-                    
-                    // Refresh the modal content
-                    const currentAct = document.getElementById('modalTitle').textContent.replace('Comment on ', '');
-                    const currentStage = document.getElementById('commentInput').dataset.actId.split('-').slice(1).join('-');
-                    openCommentModal(currentAct, currentStage);
-                }
-            }
-        }
-        
         // Initialize when the page loads
         window.onload = function() {
             // Load username from localStorage
             username = localStorage.getItem('bonnarooUsername') || 'Anonymous';
             
-            // Initialize the schedule
-            initSchedule();
+            // Set up Firebase real-time listener
+            const db = firebase.database();
+            db.ref('activities').on('value', snapshot => {
+                const activitiesData = snapshot.val() || {};
+                
+                // Reset local data
+                priorities = {};
+                comments = {};
+                
+                // Process all activities
+                Object.entries(activitiesData).forEach(([actId, data]) => {
+                    // Process priorities
+                    if (data.priorities) {
+                        priorities[actId] = data.priorities;
+                    }
+                    
+                    // Process comments
+                    if (data.comments) {
+                        comments[actId] = Object.values(data.comments);
+                    }
+                });
+                
+                // Update the UI
+                initSchedule();
+            });
             
             // Close modal when clicking outside of it
             window.onclick = function(event) {

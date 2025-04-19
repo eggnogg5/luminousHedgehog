@@ -371,6 +371,22 @@
             background-color: #cd7f32;
         }
     </style>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
+    <script>
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyC6x1_4tVJGv2ycKc3Uc-U4wwwBRcYQnWo",
+            authDomain: "luminoushedgehog-4e4f5.firebaseapp.com",
+            databaseURL: "https://luminoushedgehog-4e4f5-default-rtdb.firebaseio.com",
+            projectId: "luminoushedgehog-4e4f5",
+            storageBucket: "luminoushedgehog-4e4f5.firebasestorage.app",
+            messagingSenderId: "754666583985",
+            appId: "1:754666583985:web:4ecea8d2c6121e452faf90"
+        };
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+    </script>
 </head>
 <body>
     <div class="container">
@@ -1047,6 +1063,53 @@
                 openCommentModal(currentAct, currentStage);
             }
         }
+        
+        function updatePriority(activityId, priority) {
+            const activity = document.getElementById(activityId);
+            if (!activity) return;
+
+            // Remove all priority classes
+            activity.classList.remove('high-priority', 'medium-priority', 'low-priority');
+
+            // Add new priority class if not 'none'
+            if (priority !== 'none') {
+                activity.classList.add(`${priority}-priority`);
+            }
+
+            // Update Firebase database
+            const userId = localStorage.getItem('bonnarooUserId') || generateUserId();
+            localStorage.setItem('bonnarooUserId', userId);
+            
+            const db = firebase.database();
+            const userRef = db.ref(`users/${userId}/priorities/${activityId}`);
+            userRef.set(priority);
+        }
+
+        function generateUserId() {
+            return 'user_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // Load priorities from Firebase when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            const userId = localStorage.getItem('bonnarooUserId') || generateUserId();
+            localStorage.setItem('bonnarooUserId', userId);
+            
+            const db = firebase.database();
+            const userRef = db.ref(`users/${userId}/priorities`);
+            
+            userRef.on('value', (snapshot) => {
+                const priorities = snapshot.val() || {};
+                Object.entries(priorities).forEach(([activityId, priority]) => {
+                    const activity = document.getElementById(activityId);
+                    if (activity) {
+                        activity.classList.remove('high-priority', 'medium-priority', 'low-priority');
+                        if (priority !== 'none') {
+                            activity.classList.add(`${priority}-priority`);
+                        }
+                    }
+                });
+            });
+        });
         
         // Initialize when the page loads
         window.onload = function() {

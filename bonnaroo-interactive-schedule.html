@@ -890,19 +890,24 @@
                     comments[actId] = [];
                 }
                 
-                comments[actId].push({
+                const newComment = {
                     username: username,
                     text: commentText
-                });
+                };
                 
-                // Save to localStorage
+                comments[actId].push(newComment);
+                
+                // Save to localStorage for backwards compatibility
                 saveData();
                 
-                // Refresh the schedule
-                initSchedule();
+                // Save to Firebase
+                const db = firebase.database();
+                const commentsRef = db.ref(`activities/${actId}/comments`);
+                commentsRef.push(newComment);
             }
             
             closeModal();
+            initSchedule();
         }
         
         function setPriority(level) {
@@ -924,13 +929,10 @@
             // Save to localStorage for backwards compatibility
             saveData();
             
-            // Save to Firebase
-            const userId = localStorage.getItem('bonnarooUserId') || generateUserId();
-            localStorage.setItem('bonnarooUserId', userId);
-            
+            // Save to Firebase - store under activities to make it globally accessible
             const db = firebase.database();
-            const userRef = db.ref(`users/${userId}/priorities/${actId}`);
-            userRef.set(level);
+            const activityRef = db.ref(`activities/${actId}/priorities/${username}`);
+            activityRef.set(level);
             
             // Refresh the schedule
             initSchedule();
@@ -1056,66 +1058,74 @@
             }
         }
         
-        function deleteComment(actId, commentIndex) {
+        function deleteComment(actId, index) {
             if (comments[actId]) {
-                comments[actId].splice(commentIndex, 1);
-                if (comments[actId].length === 0) {
-                    delete comments[actId];
-                }
-                saveData();
-                initSchedule();
+                const commentToDelete = comments[actId][index];
                 
-                // Refresh the modal content
-                const currentAct = document.getElementById('modalTitle').textContent.replace('Comment on ', '');
-                const currentStage = document.getElementById('commentInput').dataset.actId.split('-').slice(1).join('-');
-                openCommentModal(currentAct, currentStage);
+                // Only allow deletion if it's the user's own comment
+                if (commentToDelete.username === username) {
+                    comments[actId].splice(index, 1);
+                    if (comments[actId].length === 0) {
+                        delete comments[actId];
+                    }
+                    
+                    // Save to localStorage
+                    saveData();
+                    
+                    // Update Firebase
+                    const db = firebase.database();
+                    const commentsRef = db.ref(`activities/${actId}/comments`);
+                    
+                    // Find and remove the matching comment in Firebase
+                    commentsRef.once('value', (snapshot) => {
+                        snapshot.forEach((childSnapshot) => {
+                            const comment = childSnapshot.val();
+                            if (comment.username === commentToDelete.username && 
+                                comment.text === commentToDelete.text) {
+                                childSnapshot.ref.remove();
+                            }
+                        });
+                    });
+                    
+                    // Refresh the UI
+                    initSchedule();
+                    
+                    // Refresh the modal content
+                    const currentAct = document.getElementById('modalTitle').textContent.replace('Comment on ', '');
+                    const currentStage = document.getElementById('commentInput').dataset.actId.split('-').slice(1).join('-');
+                    openCommentModal(currentAct, currentStage);
+                }
             }
         }
         
-        function updatePriority(activityId, priority) {
-            const activity = document.getElementById(activityId);
-            if (!activity) return;
-
-            // Remove all priority classes
-            activity.classList.remove('high-priority', 'medium-priority', 'low-priority');
-
-            // Add new priority class if not 'none'
-            if (priority !== 'none') {
-                activity.classList.add(`${priority}-priority`);
-            }
-
-            // Update Firebase database
-            const userId = localStorage.getItem('bonnarooUserId') || generateUserId();
-            localStorage.setItem('bonnarooUserId', userId);
-            
-            const db = firebase.database();
-            const userRef = db.ref(`users/${userId}/priorities/${activityId}`);
-            userRef.set(priority);
-        }
-
-        function generateUserId() {
-            return 'user_' + Math.random().toString(36).substr(2, 9);
-        }
-
-        // Load priorities from Firebase when page loads
+        // Load all data from Firebase when page loads
         document.addEventListener('DOMContentLoaded', function() {
-            const userId = localStorage.getItem('bonnarooUserId') || generateUserId();
-            localStorage.setItem('bonnarooUserId', userId);
-            
             const db = firebase.database();
-            const userRef = db.ref(`users/${userId}/priorities`);
+            const activitiesRef = db.ref('activities');
             
-            userRef.on('value', (snapshot) => {
-                const priorities = snapshot.val() || {};
-                Object.entries(priorities).forEach(([activityId, priority]) => {
-                    const activity = document.getElementById(activityId);
-                    if (activity) {
-                        activity.classList.remove('high-priority', 'medium-priority', 'low-priority');
-                        if (priority !== 'none') {
-                            activity.classList.add(`${priority}-priority`);
-                        }
+            // Listen for any changes to activities data
+            activitiesRef.on('value', (snapshot) => {
+                const activitiesData = snapshot.val() || {};
+                
+                // Reset local storage
+                priorities = {};
+                comments = {};
+                
+                // Process all activities
+                Object.entries(activitiesData).forEach(([actId, data]) => {
+                    // Handle priorities
+                    if (data.priorities) {
+                        priorities[actId] = data.priorities;
+                    }
+                    
+                    // Handle comments
+                    if (data.comments) {
+                        comments[actId] = Object.values(data.comments);
                     }
                 });
+                
+                // Update the UI
+                initSchedule();
             });
         });
         

@@ -768,10 +768,12 @@
                     });
                 }
                 
-                // Add users who set priorities
+                // Add users who set priorities and apply priority styling
                 if (priorities[actId]) {
-                    Object.keys(priorities[actId]).forEach(user => {
+                    Object.entries(priorities[actId]).forEach(([user, priority]) => {
                         interactingUsers.add(user);
+                        // Add priority class to the act div
+                        actDiv.classList.add(`${priority}-priority`);
                     });
                 }
                 

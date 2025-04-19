@@ -921,8 +921,16 @@
                 priorities[actId][username] = level;
             }
             
-            // Save to localStorage
+            // Save to localStorage for backwards compatibility
             saveData();
+            
+            // Save to Firebase
+            const userId = localStorage.getItem('bonnarooUserId') || generateUserId();
+            localStorage.setItem('bonnarooUserId', userId);
+            
+            const db = firebase.database();
+            const userRef = db.ref(`users/${userId}/priorities/${actId}`);
+            userRef.set(level);
             
             // Refresh the schedule
             initSchedule();
